@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "Deep Dive": {
+      "commandName": "Project"
+    },
+    "Deep Dive Demo": {
+      "commandName": "Project",
+      "commandLineArgs": "--demo"
+    }
+  }
+}
