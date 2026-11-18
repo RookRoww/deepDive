@@ -1,0 +1,66 @@
+DROP TABLE IF EXISTS LaunchResults;
+DROP TABLE IF EXISTS WorkspaceActions;
+DROP TABLE IF EXISTS Workspaces;
+DROP TABLE IF EXISTS Users;
+DROP TABLE IF EXISTS ActionTypes;
+CREATE TABLE Users (
+  UserId INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  WindowsUsername VARCHAR(100) NOT NULL UNIQUE,
+  DisplayName VARCHAR(100) NULL,
+  LaunchAtStartup BOOLEAN NOT NULL DEFAULT FALSE,
+  DefaultWorkspaceId INT NULL,
+  IsSetupComplete BOOLEAN NOT NULL DEFAULT FALSE,
+  CreatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE Workspaces (
+  WorkspaceId INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  UserId INT NOT NULL,
+  WorkspaceName VARCHAR(100) NOT NULL,
+  ColorHex VARCHAR(7) NOT NULL,
+  IconKey VARCHAR(50) NOT NULL,
+  DisplayOrder INT NOT NULL,
+  CreatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UpdatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (UserId) REFERENCES Users(UserId) ON DELETE CASCADE,
+  CONSTRAINT UQ_User_WorkspaceName UNIQUE (UserId, WorkspaceName)
+);
+ALTER TABLE Users
+ADD CONSTRAINT FK_User_DefaultWorkspace FOREIGN KEY (DefaultWorkspaceId) REFERENCES Workspaces(WorkspaceId) ON DELETE
+SET NULL;
+CREATE TABLE ActionTypes (
+  ActionTypeId INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  TypeCode VARCHAR(20) NOT NULL UNIQUE,
+  DisplayName VARCHAR(50) NOT NULL,
+  AllowedFormat VARCHAR(150) NOT NULL
+);
+CREATE TABLE WorkspaceActions (
+  ActionId INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  WorkspaceId INT NOT NULL,
+  ActionTypeId INT NOT NULL,
+  ActionName VARCHAR(100) NOT NULL,
+  TargetPath VARCHAR(1000) NOT NULL,
+  ActionOrder INT NOT NULL,
+  IsEnabled BOOLEAN NOT NULL DEFAULT TRUE,
+  FOREIGN KEY (WorkspaceId) REFERENCES Workspaces(WorkspaceId) ON DELETE CASCADE,
+  FOREIGN KEY (ActionTypeId) REFERENCES ActionTypes(ActionTypeId) ON DELETE RESTRICT
+);
+CREATE TABLE LaunchResults (
+  ResultId INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  WorkspaceId INT NOT NULL,
+  ActionId INT NOT NULL,
+  LaunchedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  StatusCode VARCHAR(30) NOT NULL,
+  StatusMessage VARCHAR(255) NOT NULL,
+  NeedsAttention BOOLEAN NOT NULL DEFAULT FALSE,
+  FOREIGN KEY (WorkspaceId) REFERENCES Workspaces(WorkspaceId) ON DELETE CASCADE,
+  FOREIGN KEY (ActionId) REFERENCES WorkspaceActions(ActionId) ON DELETE CASCADE
+);
+INSERT INTO ActionTypes (TypeCode, DisplayName, AllowedFormat)
+VALUES ('APP', 'Application', 'Local .exe path'),
+  ('FOLDER', 'Folder', 'Directory path'),
+  ('WEBSITE', 'Website', 'https:// URL'),
+  (
+    'DOCUMENT',
+    'Document',
+    'File path (.pdf, .docx, etc.)'
+  );
