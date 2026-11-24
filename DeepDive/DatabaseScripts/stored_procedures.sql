@@ -185,65 +185,226 @@ VALUES (
 END LOOP;
 END;
 $$;
-
 DROP PROCEDURE IF EXISTS sp_cleanup_stale_audit_logs(INT);
-
-CREATE OR REPLACE PROCEDURE sp_cleanup_stale_audit_logs(
-    p_RetentionDays INT
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    DELETE FROM LaunchResults
-    WHERE LaunchedAt < CURRENT_TIMESTAMP - (p_RetentionDays || ' days')::INTERVAL;
+CREATE OR REPLACE PROCEDURE sp_cleanup_stale_audit_logs(p_RetentionDays INT) LANGUAGE plpgsql AS $$ BEGIN
+DELETE FROM LaunchResults
+WHERE LaunchedAt < CURRENT_TIMESTAMP - (p_RetentionDays || ' days')::INTERVAL;
 END;
 $$;
-
 DROP FUNCTION IF EXISTS sp_get_workspace_actions(INT);
-
-CREATE OR REPLACE FUNCTION sp_get_workspace_actions(
-    p_WorkspaceId INT
-)
-RETURNS TABLE (
+CREATE OR REPLACE FUNCTION sp_get_workspace_actions(p_WorkspaceId INT) RETURNS TABLE (
     action_id INT,
     action_type_code VARCHAR(20),
     action_name VARCHAR(100),
     target_path VARCHAR(1000),
     action_order INT
-) 
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        a.ActionId,
-        t.TypeCode,
-        a.ActionName,
-        a.TargetPath,
-        a.ActionOrder
-    FROM WorkspaceActions a
-    JOIN ActionTypes t ON a.ActionTypeId = t.ActionTypeId
-    WHERE a.WorkspaceId = p_WorkspaceId AND a.IsEnabled = TRUE
-    ORDER BY a.ActionOrder ASC;
+  ) LANGUAGE plpgsql AS $$ BEGIN RETURN QUERY
+SELECT a.ActionId,
+  t.TypeCode,
+  a.ActionName,
+  a.TargetPath,
+  a.ActionOrder
+FROM WorkspaceActions a
+  JOIN ActionTypes t ON a.ActionTypeId = t.ActionTypeId
+WHERE a.WorkspaceId = p_WorkspaceId
+  AND a.IsEnabled = TRUE
+ORDER BY a.ActionOrder ASC;
 END;
 $$;
-
 DROP FUNCTION IF EXISTS sp_get_database_health_metrics();
-
 CREATE OR REPLACE FUNCTION sp_get_database_health_metrics(
     OUT total_users INT,
     OUT total_workspaces INT,
     OUT total_actions INT,
     OUT total_launches INT,
     OUT flagged_failures INT
-) 
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    SELECT COUNT(*) INTO total_users FROM Users;
-    SELECT COUNT(*) INTO total_workspaces FROM Workspaces;
-    SELECT COUNT(*) INTO total_actions FROM WorkspaceActions;
-    SELECT COUNT(*) INTO total_launches FROM LaunchResults;
-    SELECT COUNT(*) INTO flagged_failures FROM LaunchResults WHERE NeedsAttention = TRUE;
+  ) LANGUAGE plpgsql AS $$ BEGIN
+SELECT COUNT(*) INTO total_users
+FROM Users;
+SELECT COUNT(*) INTO total_workspaces
+FROM Workspaces;
+SELECT COUNT(*) INTO total_actions
+FROM WorkspaceActions;
+SELECT COUNT(*) INTO total_launches
+FROM LaunchResults;
+SELECT COUNT(*) INTO flagged_failures
+FROM LaunchResults
+WHERE NeedsAttention = TRUE;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_update_user_preferences(INT, VARCHAR, BOOLEAN, INT, BOOLEAN);
+CREATE OR REPLACE PROCEDURE sp_update_user_preferences(
+    p_UserId INT,
+    p_DisplayName VARCHAR(100),
+    p_LaunchAtStartup BOOLEAN,
+    p_DefaultWorkspaceId INT,
+    p_IsSetupComplete BOOLEAN
+  ) LANGUAGE plpgsql AS $$ BEGIN
+UPDATE Users
+SET DisplayName = p_DisplayName,
+  LaunchAtStartup = p_LaunchAtStartup,
+  DefaultWorkspaceId = p_DefaultWorkspaceId,
+  IsSetupComplete = p_IsSetupComplete
+WHERE UserId = p_UserId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_delete_user(INT);
+CREATE OR REPLACE PROCEDURE sp_delete_user(p_UserId INT) LANGUAGE plpgsql AS $$ BEGIN
+DELETE FROM Users
+WHERE UserId = p_UserId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_update_workspace(INT, INT, VARCHAR, VARCHAR, VARCHAR);
+CREATE OR REPLACE PROCEDURE sp_update_workspace(
+    p_WorkspaceId INT,
+    p_UserId INT,
+    p_WorkspaceName VARCHAR(100),
+    p_ColorHex VARCHAR(7),
+    p_IconKey VARCHAR(50)
+  ) LANGUAGE plpgsql AS $$ BEGIN
+UPDATE Workspaces
+SET WorkspaceName = p_WorkspaceName,
+  ColorHex = p_ColorHex,
+  IconKey = p_IconKey,
+  UpdatedAt = CURRENT_TIMESTAMP
+WHERE WorkspaceId = p_WorkspaceId
+  AND UserId = p_UserId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_update_workspace_order(INT, INT);
+CREATE OR REPLACE PROCEDURE sp_update_workspace_order(
+    p_WorkspaceId INT,
+    p_DisplayOrder INT
+  ) LANGUAGE plpgsql AS $$ BEGIN
+UPDATE Workspaces
+SET DisplayOrder = p_DisplayOrder,
+  UpdatedAt = CURRENT_TIMESTAMP
+WHERE WorkspaceId = p_WorkspaceId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_delete_workspace(INT, INT);
+CREATE OR REPLACE PROCEDURE sp_delete_workspace(p_WorkspaceId INT, p_UserId INT) LANGUAGE plpgsql AS $$ BEGIN
+DELETE FROM Workspaces
+WHERE WorkspaceId = p_WorkspaceId
+  AND UserId = p_UserId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_upsert_action_type(VARCHAR, VARCHAR, VARCHAR);
+CREATE OR REPLACE PROCEDURE sp_upsert_action_type(
+    p_TypeCode VARCHAR(20),
+    p_DisplayName VARCHAR(50),
+    p_AllowedFormat VARCHAR(150)
+  ) LANGUAGE plpgsql AS $$ BEGIN
+INSERT INTO ActionTypes (TypeCode, DisplayName, AllowedFormat)
+VALUES (p_TypeCode, p_DisplayName, p_AllowedFormat) ON CONFLICT (TypeCode) DO
+UPDATE
+SET DisplayName = EXCLUDED.DisplayName,
+  AllowedFormat = EXCLUDED.AllowedFormat;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_delete_action_type(INT);
+CREATE OR REPLACE PROCEDURE sp_delete_action_type(p_ActionTypeId INT) LANGUAGE plpgsql AS $$ BEGIN
+DELETE FROM ActionTypes
+WHERE ActionTypeId = p_ActionTypeId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_add_workspace_action(INT, INT, VARCHAR, VARCHAR, INT, BOOLEAN);
+CREATE OR REPLACE PROCEDURE sp_add_workspace_action(
+    p_WorkspaceId INT,
+    p_ActionTypeId INT,
+    p_ActionName VARCHAR(100),
+    p_TargetPath VARCHAR(1000),
+    p_ActionOrder INT,
+    p_IsEnabled BOOLEAN
+  ) LANGUAGE plpgsql AS $$ BEGIN
+INSERT INTO WorkspaceActions (
+    WorkspaceId,
+    ActionTypeId,
+    ActionName,
+    TargetPath,
+    ActionOrder,
+    IsEnabled
+  )
+VALUES (
+    p_WorkspaceId,
+    p_ActionTypeId,
+    p_ActionName,
+    p_TargetPath,
+    p_ActionOrder,
+    p_IsEnabled
+  );
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_update_workspace_action(INT, INT, INT, VARCHAR, VARCHAR, INT, BOOLEAN);
+CREATE OR REPLACE PROCEDURE sp_update_workspace_action(
+    p_ActionId INT,
+    p_WorkspaceId INT,
+    p_ActionTypeId INT,
+    p_ActionName VARCHAR(100),
+    p_TargetPath VARCHAR(1000),
+    p_ActionOrder INT,
+    p_IsEnabled BOOLEAN
+  ) LANGUAGE plpgsql AS $$ BEGIN
+UPDATE WorkspaceActions
+SET ActionTypeId = p_ActionTypeId,
+  ActionName = p_ActionName,
+  TargetPath = p_TargetPath,
+  ActionOrder = p_ActionOrder,
+  IsEnabled = p_IsEnabled
+WHERE ActionId = p_ActionId
+  AND WorkspaceId = p_WorkspaceId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_toggle_workspace_action(INT, BOOLEAN);
+CREATE OR REPLACE PROCEDURE sp_toggle_workspace_action(p_ActionId INT, p_IsEnabled BOOLEAN) LANGUAGE plpgsql AS $$ BEGIN
+UPDATE WorkspaceActions
+SET IsEnabled = p_IsEnabled
+WHERE ActionId = p_ActionId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_delete_workspace_action(INT, INT);
+CREATE OR REPLACE PROCEDURE sp_delete_workspace_action(p_ActionId INT, p_WorkspaceId INT) LANGUAGE plpgsql AS $$ BEGIN
+DELETE FROM WorkspaceActions
+WHERE ActionId = p_ActionId
+  AND WorkspaceId = p_WorkspaceId;
+END;
+$$;
+DROP PROCEDURE IF EXISTS sp_resolve_launch_attention(INT, VARCHAR);
+CREATE OR REPLACE PROCEDURE sp_resolve_launch_attention(
+    p_ResultId INT,
+    p_StatusMessage VARCHAR(255)
+  ) LANGUAGE plpgsql AS $$ BEGIN
+UPDATE LaunchResults
+SET NeedsAttention = FALSE,
+  StatusMessage = p_StatusMessage
+WHERE ResultId = p_ResultId;
+END;
+$$;
+DROP FUNCTION IF EXISTS sp_get_workspace_launch_history(INT, INT);
+CREATE OR REPLACE FUNCTION sp_get_workspace_launch_history(
+    p_WorkspaceId INT,
+    p_Limit INT DEFAULT 50
+  ) RETURNS TABLE (
+    result_id INT,
+    action_id INT,
+    action_name VARCHAR(100),
+    launched_at TIMESTAMP,
+    status_code VARCHAR(30),
+    status_message VARCHAR(255),
+    needs_attention BOOLEAN
+  ) LANGUAGE plpgsql AS $$ BEGIN RETURN QUERY
+SELECT lr.ResultId,
+  lr.ActionId,
+  wa.ActionName,
+  lr.LaunchedAt,
+  lr.StatusCode,
+  lr.StatusMessage,
+  lr.NeedsAttention
+FROM LaunchResults lr
+  JOIN WorkspaceActions wa ON wa.ActionId = lr.ActionId
+WHERE lr.WorkspaceId = p_WorkspaceId
+ORDER BY lr.LaunchedAt DESC,
+  lr.ResultId DESC
+LIMIT p_Limit;
 END;
 $$;
